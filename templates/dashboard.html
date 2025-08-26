@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Dashboard - SmartMaps</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
+</head>
+<body>
+    <div class="dashboard-container">
+        <h1>Olá, {{ username }} 👋</h1>
+        <p>Bem-vindo ao sistema <strong>SmartMaps</strong>. Selecione uma opção abaixo:</p>
+
+        <div class="button-group">
+            <a href="{{ url_for('mapa') }}" class="btn">🗺️ Abrir Mapa</a>
+            <a href="{{ url_for('logout') }}" class="btn btn-logout">🚪 Sair</a>
+        </div>
+    </div>
+</body>
+</html>
+

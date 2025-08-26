@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <title>SmartMaps — Rotas por Transporte</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet"
+        href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <style>
+    body { margin:0; font-family:Arial,sans-serif; }
+    #controls {
+      padding:20px; background:#f4f4f4;
+      display:flex; flex-direction:column; gap:10px;
+    }
+    input, select, button {
+      padding:10px; font-size:16px;
+      width:100%; box-sizing:border-box;
+    }
+    button {
+      background:#007bff; color:#fff;
+      border:none; border-radius:4px;
+    }
+    #map { height:75vh; width:100%; }
+    .custom-label { font-size:14px; }
+  </style>
+</head>
+<body>
+  <div id="controls">
+    <input type="text" id="enderecoA" placeholder="Endereço de partida">
+    <input type="text" id="enderecoB" placeholder="Endereço de destino">
+    <select id="tipoTransporte">
+      <option value="driving-car">Carro</option>
+      <option value="cycling-regular">Bicicleta</option>
+      <option value="foot-walking">A pé</option>
+    </select>
+    <button onclick="calcularRota()">Calcular Rota</button>
+    <div id="infoRota" style="display:none;"></div>
+  </div>
+
+  <div id="map"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const ORS_API_KEY = "{{ api_key }}";
+
+    const map = L.map('map').setView([-23.5505, -46.6333], 13);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
+
+    let rotaLayers = [];
+    let marcadorA = null, marcadorB = null;
+
+    function decodePolyline(encoded) {
+      let points = [], index=0, lat=0, lng=0;
+      while (index < encoded.length) {
+        let b, shift=0, result=0;
+        do { b = encoded.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift+=5; }
+        while (b >= 0x20);
+        let dlat = (result & 1) ? ~(result >> 1) : (result >> 1);
+        lat += dlat;
+        shift=0; result=0;
+        do { b = encoded.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift+=5; }
+        while (b >= 0x20);
+        let dlng = (result & 1) ? ~(result >> 1) : (result >> 1);
+        lng += dlng;
+        points.push([lat / 1e5, lng / 1e5]);
+      }
+      return points;
+    }
+
+    function formatarDistancia(m) {
+      return m >= 1000 ? (m/1000).toFixed(2)+" km" : m.toFixed(0)+" m";
+    }
+
+    async function geocodificar(end) {
+      const url = `https://api.openrouteservice.org/geocode/search?api_key=${ORS_API_KEY}&text=${encodeURIComponent(end)}&size=1`;
+      const r = await fetch(url);
+      const d = await r.json();
+      if (d.features?.length) return d.features[0].geometry.coordinates;
+      throw new Error(`Endereço não encontrado: ${end}`);
+    }
+
+    async function calcularRota() {
+      const a = document.getElementById("enderecoA").value.trim();
+      const b = document.getElementById("enderecoB").value.trim();
+      const tipo = document.getElementById("tipoTransporte").value;
+      const info = document.getElementById("infoRota");
+
+      info.style.display = "none"; info.innerHTML = "";
+      if (!a||!b) { alert("Preencha os dois endereços."); return; }
+
+      try {
+        const coordA = await geocodificar(a);
+        const coordB = await geocodificar(b);
+        if (marcadorA) map.removeLayer(marcadorA);
+        if (marcadorB) map.removeLayer(marcadorB);
+        rotaLayers.forEach(l => map.removeLayer(l));
+        rotaLayers = [];
+
+        marcadorA = L.marker([coordA[1],coordA[0]]).addTo(map).bindPopup("Ponto A").openPopup();
+        marcadorB = L.marker([coordB[1],coordB[0]]).addTo(map).bindPopup("Ponto B").openPopup();
+
+        const url = `https://api.openrouteservice.org/v2/directions/${tipo}`;
+        const resp = await fetch(url, {
+          method:"POST",
+          headers:{
+            "Authorization": `Bearer ${ORS_API_KEY}`,
+            "Content-Type":"application/json"
+          },
+          body: JSON.stringify({
+            coordinates:[coordA, coordB]
+          })
+        });
+
+        const data = await resp.json();
+        console.log("Resposta rota:", data);
+
+        if (!data.routes?.length) {
+          alert("Nenhuma rota encontrada.");
+          return;
+        }
+
+        const rota = data.routes[0];
+        const coords = decodePolyline(rota.geometry);
+        const latlngs = coords.map(c => [c[0],c[1]]);
+        const poly = L.polyline(latlngs, { color:"blue", weight:5 }).addTo(map);
+        rotaLayers.push(poly);
+        map.fitBounds(poly.getBounds());
+
+        const meio = latlngs[Math.floor(latlngs.length/2)];
+        const dist = formatarDistancia(rota.summary.distance);
+        L.marker(meio, {
+          icon: L.divIcon({
+            className:'custom-label',
+            html: `<div style="background:#fff;padding:5px;border-radius:4px;border:1px solid #999;">${dist}</div>`
+          })
+        }).addTo(map);
+
+        const dur = Math.round(rota.summary.duration/60)+" min";
+        info.style.display = "block";
+        info.innerHTML = `<strong>Distância:</strong> ${dist} &nbsp;&nbsp; <strong>Duração:</strong> ${dur}`;
+
+      } catch (err) {
+        alert("Erro: " + err.message);
+        console.error(err);
+      }
+    }
+  </script>
+</body>
+</html>
+
